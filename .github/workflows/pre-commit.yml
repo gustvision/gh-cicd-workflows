@@ -1,0 +1,66 @@
+name: ci-pre-commit-checks
+
+# Doc: https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions
+
+on:
+  workflow_call:
+    inputs:
+      tf_version:
+        description: 'Set the Terraform version to use'
+        default: 1.1.0
+        required: false
+        type: string
+      tf_docs_version:
+        description: 'Set the Terraform Docs version to use'
+        default: v0.16.0
+        required: false
+        type: string
+    secrets:
+      token:
+        required: true
+
+jobs:
+
+  ##############################################################################
+  # pre-commit-checks
+  ##############################################################################
+
+  ci-pre-commit-checks:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Doc: https://github.com/marketplace/actions/checkout
+    - uses: actions/checkout@v3
+      with:
+        token: ${{ secrets.token }}
+
+    # Doc: https://github.com/marketplace/actions/setup-python
+    - uses: actions/setup-python@v3
+      with:
+        python-version: 3.9
+
+    # Doc: https://github.com/marketplace/actions/hashicorp-setup-terraform
+    - uses: hashicorp/setup-terraform@v1
+      with:
+        terraform_version: ${{ inputs.tf_version }}
+
+    # Doc: https://github.com/marketplace/actions/setup-tflint
+    - uses: terraform-linters/setup-tflint@v2
+
+    # Doc: https://github.com/marketplace/actions/cache
+    - uses: actions/cache@v3
+      with:
+        path: ~/.cache/pre-commit
+        key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+
+    - name: Install terraform-docs
+      run: |
+        curl -sSLo ./terraform-docs.tar.gz https://github.com/terraform-docs/terraform-docs/releases/download/${{ inputs.tf_docs_version }}/terraform-docs-${{ inputs.tf_docs_version }}-$(uname)-amd64.tar.gz
+        sudo tar -xzf terraform-docs.tar.gz -C /usr/bin/ terraform-docs
+        rm terraform-docs.tar.gz 2> /dev/null
+
+    - name: Install pre-commit
+      run: pip install pre-commit
+
+    - name: Run pre-commit
+      run: pre-commit run --all-files

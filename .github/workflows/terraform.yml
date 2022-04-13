@@ -1,0 +1,110 @@
+name: cd-terraform
+
+# Doc: https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions
+
+on:
+  workflow_call:
+    inputs:
+      tf_folder:
+        description: 'Terraform folder to use'
+        required: true
+        type: string
+      tf_version:
+        description: 'Set the Terraform version to use'
+        default: 1.1.0
+        required: false
+        type: string
+      tf_apply:
+        description: 'Define if Terraform should apply'
+        default: false
+        required: false
+        type: boolean
+    secrets:
+      token:
+        required: true
+      aws_access_key_id:
+        required: true
+      aws_secret_access_key:
+        required: true
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.aws_access_key_id }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.aws_secret_access_key }}
+
+jobs:
+
+  ##############################################################################
+  # Terraform Init, Plan & Apply
+  ##############################################################################
+
+  cd-terraform:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Doc: https://github.com/marketplace/actions/checkout
+    - uses: actions/checkout@v3
+      with:
+        token: ${{ secrets.token }}
+
+    # Doc: https://github.com/marketplace/actions/hashicorp-setup-terraform
+    - uses: hashicorp/setup-terraform@v1
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+    - name: Git config for private GitHub repositories
+      id: git_config
+      run: git config --global url."https://oauth2:${{ secrets.token }}@github.com".insteadOf ssh://git@github.com
+
+    - name: Terraform init
+      id: tf_init
+      run: terraform init -no-color
+      working-directory: ${{ inputs.tf_folder }}
+
+    - name: Terraform plan
+      id: tf_plan
+      run: terraform plan -no-color -detailed-exitcode
+      working-directory: ${{ inputs.tf_folder }}
+      continue-on-error: true
+
+    - name: "Terraform plan: add GitHub comment if any change is detected"
+      if: ${{ github.event_name == 'pull_request' && steps.tf_plan.outputs.exitcode == 2 }}
+      id: tf_plan_gh_comment
+      env:
+        TF_PLAN_STDOUT: "${{ steps.tf_plan.outputs.stdout }}"
+      # Doc: https://github.com/marketplace/actions/github-script
+      uses: actions/github-script@v6
+      with:
+        github-token: ${{ secrets.token }}
+        script: |
+          const output = `### Github Action  ${{ github.workflow }}/${{ github.job }}
+          ⚠️ Terraform Plan detected a change on \`${{ inputs.tf_folder }}\` ⚠️
+          <details><summary>Show Plan</summary>
+
+          \`\`\`\n
+          ${process.env.TF_PLAN_STDOUT}
+          \`\`\`
+          </details>
+
+          *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`, Workflow: \`${{ github.workflow }}\`*`;
+
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: output
+          })
+    - name: "Terraform plan: exit on failure"
+      if: ${{ github.event_name == 'pull_request' && steps.tf_plan.outputs.exitcode == 1 }}
+      id: tf_plan_exit_on_fail
+      # Doc: https://github.com/marketplace/actions/github-script
+      uses: actions/github-script@v6
+      with:
+        github-token: ${{ secrets.token }}
+        script: |
+          process.exit(1);
+
+    - name: Terraform apply (only if a change is detected)
+      if: ${{ inputs.tf_apply == true && steps.tf_plan.outputs.exitcode == 2 }}
+      id: tf_apply
+      run: terraform apply -auto-approve -no-color
+      working-directory: ${{ inputs.tf_folder }}
