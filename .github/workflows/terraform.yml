@@ -11,7 +11,7 @@ on:
         type: string
       tf_version:
         description: 'Set the Terraform version to use'
-        default: 1.1.0
+        default: 1.1.7
         required: false
         type: string
       tf_apply:
@@ -47,7 +47,7 @@ jobs:
         token: ${{ secrets.token }}
 
     # Doc: https://github.com/marketplace/actions/hashicorp-setup-terraform
-    - uses: hashicorp/setup-terraform@v1
+    - uses: hashicorp/setup-terraform@v2
       with:
         terraform_version: ${{ env.TERRAFORM_VERSION }}
 
